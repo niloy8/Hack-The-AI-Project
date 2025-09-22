@@ -30,6 +30,7 @@ const MainPage = () => {
     const [feedbackData, setFeedbackData] = useState(null);
     const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
     const [isSubmittingAnswer, setIsSubmittingAnswer] = useState(false);
+    const [showJobTitleAlert, setShowJobTitleAlert] = useState(false);
     const videoRef = useRef(null);
 
     // Store chunks in refs to avoid stale closure issues
@@ -255,25 +256,42 @@ const MainPage = () => {
             setInterviewData(prev => ({ ...prev, cv: file }));
             const extractedTitle = extractJobTitleFromCV(file);
             setInterviewData(prev => ({ ...prev, jobTitle: extractedTitle }));
+            // Hide alert if job title is now available
+            if (extractedTitle.trim()) {
+                setShowJobTitleAlert(false);
+            }
+        }
+    };
+
+    const handleJobTitleChange = (e) => {
+        const value = e.target.value;
+        setInterviewData(prev => ({ ...prev, jobTitle: value }));
+        // Hide alert if user starts typing
+        if (value.trim()) {
+            setShowJobTitleAlert(false);
         }
     };
 
     const handleStartInterview = async (mode) => {
-        if (interviewData.jobTitle.trim()) {
-            // Fetch questions from API
-            const questions = await fetchQuestions(interviewData.jobTitle);
-
-            setInterviewData(prev => ({
-                ...prev,
-                isInterviewStarted: true,
-                recordingMode: mode,
-                questions: questions,
-                answers: new Array(questions.length).fill(''),
-                audioFiles: new Array(questions.length).fill(null),
-                videoFiles: new Array(questions.length).fill(null),
-                nervousness: new Array(questions.length).fill(0)
-            }));
+        if (!interviewData.jobTitle.trim()) {
+            setShowJobTitleAlert(true);
+            return;
         }
+
+        setShowJobTitleAlert(false);
+        // Fetch questions from API
+        const questions = await fetchQuestions(interviewData.jobTitle);
+
+        setInterviewData(prev => ({
+            ...prev,
+            isInterviewStarted: true,
+            recordingMode: mode,
+            questions: questions,
+            answers: new Array(questions.length).fill(''),
+            audioFiles: new Array(questions.length).fill(null),
+            videoFiles: new Array(questions.length).fill(null),
+            nervousness: new Array(questions.length).fill(0)
+        }));
     };
 
     const sendDataToBackend = async (
@@ -430,6 +448,7 @@ const MainPage = () => {
         setRecordedBlob(null);
         setExtractedAudioFromVideo(null);
         setFeedbackData(null);
+        setShowJobTitleAlert(false);
         chunksRef.current = [];
     };
 
@@ -1001,10 +1020,22 @@ const MainPage = () => {
                             <input
                                 type="text"
                                 value={interviewData.jobTitle}
-                                onChange={(e) => setInterviewData(prev => ({ ...prev, jobTitle: e.target.value }))}
+                                onChange={handleJobTitleChange}
                                 placeholder="e.g., Software Engineer, Data Scientist, Product Manager"
-                                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${showJobTitleAlert ? 'border-red-300' : 'border-gray-300'}`}
                             />
+                            {showJobTitleAlert && (
+                                <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                                    <div className="flex items-center">
+                                        <svg className="w-5 h-5 text-red-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                                        </svg>
+                                        <p className="text-sm text-red-700 font-medium">
+                                            Please enter a job title to start the interview.
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
                             <p className="text-xs text-gray-500 mt-1">
                                 {interviewData.cv ?
                                     '* Job title extracted from CV. You can modify it above.' :
@@ -1020,8 +1051,8 @@ const MainPage = () => {
                             </label>
                             <div className="grid md:grid-cols-2 gap-4">
                                 <div
-                                    className="border-2 border-blue-200 rounded-lg p-4 hover:border-blue-400 cursor-pointer transition-colors bg-blue-50"
-                                    onClick={() => interviewData.jobTitle.trim() && handleStartInterview('audio')}
+                                    className={`border-2 border-blue-200 rounded-lg p-4 hover:border-blue-400 cursor-pointer transition-colors bg-blue-50 ${!interviewData.jobTitle.trim() ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    onClick={() => handleStartInterview('audio')}
                                 >
                                     <div className="flex items-center mb-3">
                                         <svg className="w-6 h-6 text-blue-600 mr-2" fill="currentColor" viewBox="0 0 24 24">
@@ -1039,8 +1070,8 @@ const MainPage = () => {
                                 </div>
 
                                 <div
-                                    className="border-2 border-purple-200 rounded-lg p-4 hover:border-purple-400 cursor-pointer transition-colors bg-purple-50"
-                                    onClick={() => interviewData.jobTitle.trim() && handleStartInterview('video')}
+                                    className={`border-2 border-purple-200 rounded-lg p-4 hover:border-purple-400 cursor-pointer transition-colors bg-purple-50 ${!interviewData.jobTitle.trim() ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    onClick={() => handleStartInterview('video')}
                                 >
                                     <div className="flex items-center mb-3">
                                         <svg className="w-6 h-6 text-purple-600 mr-2" fill="currentColor" viewBox="0 0 24 24">
