@@ -11,13 +11,13 @@ const MainPage = () => {
         nervousness: [],
         isInterviewStarted: false,
         isInterviewCompleted: false,
-        recordingMode: null
+        recordingMode: null,
+        questions: []
     });
 
     const [currentAnswer, setCurrentAnswer] = useState('');
     const [isRecording, setIsRecording] = useState(false);
     const [isVideoCaptureEnabled, setIsVideoCaptureEnabled] = useState(false);
-    const [recognition, setRecognition] = useState(null);
     const [mediaRecorder, setMediaRecorder] = useState(null);
     const [audioChunks, setAudioChunks] = useState([]);
     const [videoError, setVideoError] = useState('');
@@ -27,6 +27,9 @@ const MainPage = () => {
     const [isInitialized, setIsInitialized] = useState(false);
     const [recordedBlob, setRecordedBlob] = useState(null);
     const [extractedAudioFromVideo, setExtractedAudioFromVideo] = useState(null);
+    const [feedbackData, setFeedbackData] = useState(null);
+    const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
+    const [isSubmittingAnswer, setIsSubmittingAnswer] = useState(false);
     const videoRef = useRef(null);
 
     // Store chunks in refs to avoid stale closure issues
@@ -37,7 +40,7 @@ const MainPage = () => {
         console.log('Chunks count:', audioChunks.length);
     }, [audioChunks]);
 
-    // Demo questions based on job title
+    // Demo questions based on job title (fallback)
     const demoQuestions = [
         { id: 1, question: "Tell me about yourself and your professional background.", category: "Introduction" },
         { id: 2, question: "Why are you interested in this position?", category: "Motivation" },
@@ -74,6 +77,43 @@ const MainPage = () => {
             return 'Marketing Manager';
         } else {
             return demoJobTitles[Math.floor(Math.random() * demoJobTitles.length)];
+        }
+    };
+
+    // Fetch questions from API
+    const fetchQuestions = async (jobTitle) => {
+        try {
+            setIsLoadingQuestions(true);
+            const response = await fetch('https://cmfoxoaokjf2y2py53m5n2pv7.agent.a.smyth.ai/api/generate_interview_questions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    topics: `${jobTitle}, software development, machine learning, data science`,
+                    question_count: 30,
+                    type: "Intern, Entry Level"
+                })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                // Transform API response to match our question format
+                const questions = Array.isArray(data) ? data : data.questions || [];
+                return questions.map((q, index) => ({
+                    id: index + 1,
+                    question: typeof q === 'string' ? q : q.question || q.text || q,
+                    category: q.category || `Question ${index + 1}`
+                }));
+            } else {
+                throw new Error('Failed to fetch questions');
+            }
+        } catch (error) {
+            console.log('Error fetching questions:', error);
+            // Fallback to demo questions
+            return demoQuestions;
+        } finally {
+            setIsLoadingQuestions(false);
         }
     };
 
@@ -120,53 +160,6 @@ const MainPage = () => {
                         videoRef.current?.play();
                     };
                 }
-            }
-
-            // Speech Recognition (works for both modes)
-            if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-                const SpeechRecognitionConstructor = window.SpeechRecognition || window.webkitSpeechRecognition;
-                const recognitionInstance = new SpeechRecognitionConstructor();
-
-                recognitionInstance.continuous = true;
-                recognitionInstance.interimResults = true;
-                recognitionInstance.lang = 'en-US';
-
-                recognitionInstance.onresult = (event) => {
-                    let interimTranscript = '';
-                    let finalTranscript = '';
-                    for (let i = event.resultIndex; i < event.results.length; i++) {
-                        const transcript = event.results[i][0].transcript;
-                        if (event.results[i].isFinal) {
-                            finalTranscript += transcript;
-                        } else {
-                            interimTranscript += transcript;
-                        }
-                    }
-                    setCurrentAnswer(prev => {
-                        const baseText = prev.replace(/\[Speaking...\].*$/, '').trim();
-                        if (finalTranscript) {
-                            return baseText + (baseText ? ' ' : '') + finalTranscript;
-                        } else if (interimTranscript) {
-                            return baseText + (baseText ? ' ' : '') + '[Speaking...] ' + interimTranscript;
-                        }
-                        return baseText;
-                    });
-                };
-
-                recognitionInstance.onerror = (event) => {
-                    console.log('Speech recognition error:', event.error, event.message);
-                    setIsRecording(false);
-                    setAudioError('Speech recognition error: ' + event.error);
-                };
-
-                recognitionInstance.onend = () => {
-                    console.log('Speech recognition ended');
-                    setIsRecording(false);
-                    setCurrentAnswer(prev => prev.replace(/\[Speaking...\].*$/, '').trim());
-                };
-
-                setRecognition(recognitionInstance);
-                console.log('Speech recognition initialized successfully');
             }
 
             // MediaRecorder
@@ -252,15 +245,8 @@ const MainPage = () => {
     useEffect(() => {
         return () => {
             cleanupStreams();
-            if (recognition) {
-                try {
-                    recognition.stop();
-                } catch (e) {
-                    console.log('Error stopping speech recognition:', e);
-                }
-            }
         };
-    }, [cleanupStreams, recognition]);
+    }, [cleanupStreams]);
 
     // --- UI Handlers ---
     const handleFileUpload = (event) => {
@@ -272,16 +258,20 @@ const MainPage = () => {
         }
     };
 
-    const handleStartInterview = (mode) => {
+    const handleStartInterview = async (mode) => {
         if (interviewData.jobTitle.trim()) {
+            // Fetch questions from API
+            const questions = await fetchQuestions(interviewData.jobTitle);
+
             setInterviewData(prev => ({
                 ...prev,
                 isInterviewStarted: true,
                 recordingMode: mode,
-                answers: new Array(demoQuestions.length).fill(''),
-                audioFiles: new Array(demoQuestions.length).fill(null),
-                videoFiles: new Array(demoQuestions.length).fill(null),
-                nervousness: new Array(demoQuestions.length).fill(0)
+                questions: questions,
+                answers: new Array(questions.length).fill(''),
+                audioFiles: new Array(questions.length).fill(null),
+                videoFiles: new Array(questions.length).fill(null),
+                nervousness: new Array(questions.length).fill(0)
             }));
         }
     };
@@ -290,13 +280,16 @@ const MainPage = () => {
         questionIndex,
         textAnswer,
         audioBlob,
-        videoBlob
+        videoBlob,
+        question
     ) => {
         try {
+            setIsSubmittingAnswer(true);
             const formData = new FormData();
             formData.append('questionIndex', questionIndex.toString());
             formData.append('textAnswer', textAnswer);
             formData.append('jobTitle', interviewData.jobTitle);
+            formData.append('question', question);
 
             if (interviewData.cv) {
                 formData.append('cv', interviewData.cv);
@@ -308,6 +301,7 @@ const MainPage = () => {
                 formData.append('videoFile', videoBlob, `question_${questionIndex + 1}.webm`);
             }
 
+            // Replace with your actual backend endpoint
             const response = await fetch('/api/interview/submit-answer', {
                 method: 'POST',
                 body: formData,
@@ -319,12 +313,16 @@ const MainPage = () => {
             }
         } catch (error) {
             console.log('Error sending data to backend:', error);
+        } finally {
+            setIsSubmittingAnswer(false);
         }
         return Math.floor(Math.random() * 100);
     };
 
     const handleNextQuestion = async () => {
-        if (currentAnswer.trim() && !currentAnswer.includes('[Speaking...]')) {
+        if (currentAnswer.trim()) {
+            const currentQuestionData = interviewData.questions[interviewData.currentQuestion];
+
             const newAnswers = [...interviewData.answers];
             const newAudioFiles = [...interviewData.audioFiles];
             const newVideoFiles = [...interviewData.videoFiles];
@@ -345,7 +343,8 @@ const MainPage = () => {
                 interviewData.currentQuestion,
                 currentAnswer,
                 interviewData.recordingMode === 'video' ? extractedAudioFromVideo : recordedBlob,
-                interviewData.recordingMode === 'video' ? recordedBlob : null
+                interviewData.recordingMode === 'video' ? recordedBlob : null,
+                currentQuestionData.question
             );
             newNervousness[interviewData.currentQuestion] = nervousnessScore;
 
@@ -356,7 +355,7 @@ const MainPage = () => {
                 videoFiles: newVideoFiles,
                 nervousness: newNervousness,
                 currentQuestion: prev.currentQuestion + 1,
-                isInterviewCompleted: prev.currentQuestion + 1 >= demoQuestions.length
+                isInterviewCompleted: prev.currentQuestion + 1 >= prev.questions.length
             }));
 
             setCurrentAnswer('');
@@ -367,13 +366,43 @@ const MainPage = () => {
         }
     };
 
-    const handleCancelInterview = () => {
-        if (isRecording && recognition) {
-            try { recognition.stop(); } catch (e) {
-                console.log('Error stopping speech recognition:', e);
+    const handleEndInterview = async () => {
+        try {
+            // Fetch feedback from Excel/backend
+            const response = await fetch('/api/interview/get-feedback', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    jobTitle: interviewData.jobTitle,
+                    answers: interviewData.answers,
+                    nervousnessScores: interviewData.nervousness
+                })
+            });
+
+            if (response.ok) {
+                const feedback = await response.json();
+                setFeedbackData(feedback);
+            } else {
+                // Fallback feedback
+                setFeedbackData(generateReport());
             }
+        } catch (error) {
+            console.log('Error fetching feedback:', error);
+            setFeedbackData(generateReport());
         }
-        if (mediaRecorder && mediaRecorder.state === 'recording') {
+
+        cleanupStreams();
+        setIsRecording(false);
+        setIsVideoCaptureEnabled(false);
+        setIsInitialized(false);
+
+        setInterviewData(prev => ({ ...prev, isInterviewCompleted: true }));
+    };
+
+    const handleCancelInterview = () => {
+        if (isRecording && mediaRecorder && mediaRecorder.state === 'recording') {
             try { mediaRecorder.stop(); } catch (e) {
                 console.log('Error stopping media recorder:', e);
             }
@@ -393,12 +422,14 @@ const MainPage = () => {
             nervousness: [],
             isInterviewStarted: false,
             isInterviewCompleted: false,
-            recordingMode: null
+            recordingMode: null,
+            questions: []
         });
         setCurrentAnswer('');
         setAudioChunks([]);
         setRecordedBlob(null);
         setExtractedAudioFromVideo(null);
+        setFeedbackData(null);
         chunksRef.current = [];
     };
 
@@ -407,16 +438,13 @@ const MainPage = () => {
             await initializeRecording(interviewData.recordingMode);
             return;
         }
-        if (!recognition || !mediaRecorder) {
+        if (!mediaRecorder) {
             alert('Recording is not supported in your browser or microphone access denied.');
             return;
         }
 
         if (isRecording) {
             console.log('Stopping recording...');
-            try { recognition.stop(); } catch (e) {
-                console.log('Error stopping speech recognition:', e);
-            }
             if (mediaRecorder.state === 'recording') {
                 try {
                     mediaRecorder.stop();
@@ -431,12 +459,6 @@ const MainPage = () => {
             setAudioChunks([]);
             setRecordedBlob(null);
             setExtractedAudioFromVideo(null);
-
-            try {
-                recognition.start();
-            } catch (e) {
-                console.log('Error starting speech recognition:', e);
-            }
 
             if (mediaRecorder.state === 'inactive') {
                 try {
@@ -470,7 +492,7 @@ const MainPage = () => {
                 jobTitle: interviewData.jobTitle,
                 answers: interviewData.answers,
                 nervousnessScores: interviewData.nervousness,
-                overallScore: generateReport().overallScore,
+                overallScore: (feedbackData || generateReport()).overallScore,
                 timestamp: new Date().toISOString()
             };
 
@@ -493,9 +515,22 @@ const MainPage = () => {
         }
     };
 
+    // Loading Questions Screen
+    if (isLoadingQuestions) {
+        return (
+            <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+                <div className="text-center">
+                    <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                    <h2 className="text-2xl font-semibold text-gray-800 mb-2">Loading Interview Questions</h2>
+                    <p className="text-gray-600">Generating personalized questions for {interviewData.jobTitle}...</p>
+                </div>
+            </div>
+        );
+    }
+
     // Interview Completed Screen
     if (interviewData.isInterviewCompleted) {
-        const report = generateReport();
+        const report = feedbackData || generateReport();
 
         return (
             <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
@@ -503,8 +538,9 @@ const MainPage = () => {
                     <div className="bg-white rounded-2xl shadow-xl p-8">
                         <div className="text-center mb-8">
                             <h1 className="text-3xl font-bold text-gray-800 mb-2">Interview Completed!</h1>
-                            <p className="text-gray-600">Here's your detailed performance report</p>
+                            <p className="text-gray-600">Here's your detailed performance report from our AI analysis</p>
                             <p className="text-sm text-blue-600 mt-2">Recording Mode: {interviewData.recordingMode === 'video' ? 'Video with Audio Extract' : 'Audio Only'}</p>
+                            <p className="text-sm text-gray-500 mt-1">Questions Answered: {interviewData.answers.filter(a => a).length} of {interviewData.questions.length}</p>
                         </div>
                         <div className="grid md:grid-cols-2 gap-8">
                             <div className="space-y-6">
@@ -513,15 +549,15 @@ const MainPage = () => {
                                     <div className="text-4xl font-bold text-green-600">{report.overallScore}%</div>
                                 </div>
                                 <div className="bg-blue-50 rounded-xl p-6">
-                                    <h3 className="text-xl font-semibold text-blue-800 mb-4">Nervousness Analysis</h3>
+                                    <h3 className="text-xl font-semibold text-blue-800 mb-4">Performance Analysis</h3>
                                     <div className="text-2xl font-bold text-blue-600">{report.nervousnessScore}%</div>
                                     <p className="text-blue-600 mt-2">
-                                        {report.nervousnessScore < 30 ? "Very Confident" :
-                                            report.nervousnessScore < 60 ? "Moderately Confident" : "Needs Confidence Building"}
+                                        {report.nervousnessScore < 30 ? "Excellent Performance" :
+                                            report.nervousnessScore < 60 ? "Good Performance" : "Needs Improvement"}
                                     </p>
                                 </div>
                                 <div className="bg-purple-50 rounded-xl p-6">
-                                    <h3 className="text-xl font-semibold text-purple-800 mb-4">Recommendation</h3>
+                                    <h3 className="text-xl font-semibold text-purple-800 mb-4">AI Recommendation</h3>
                                     <p className="text-purple-700 font-medium">{report.recommendation}</p>
                                 </div>
                             </div>
@@ -553,35 +589,39 @@ const MainPage = () => {
                         <div className="mt-8 bg-gray-50 rounded-xl p-6">
                             <h3 className="text-xl font-semibold text-gray-800 mb-4">Question-by-Question Analysis</h3>
                             <div className="space-y-6">
-                                {demoQuestions.map((question, index) => (
-                                    <div key={question.id} className="border-l-4 border-blue-400 pl-4">
-                                        <p className="font-medium text-gray-800">{question.question}</p>
-                                        <p className="text-gray-600 mt-1">Nervousness: {interviewData.nervousness[index] || 0}%</p>
-                                        <p className="text-gray-700 mt-2 italic">"{interviewData.answers[index] || 'No answer provided'}"</p>
-                                        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            {interviewData.audioFiles[index] && (
-                                                <div className="bg-white p-3 rounded-lg border">
-                                                    <p className="text-xs text-gray-500 mb-2">Audio Recording:</p>
-                                                    <audio
-                                                        controls
-                                                        className="w-full h-8"
-                                                        src={URL.createObjectURL(interviewData.audioFiles[index])}
-                                                    />
-                                                </div>
-                                            )}
-                                            {interviewData.videoFiles[index] && (
-                                                <div className="bg-white p-3 rounded-lg border">
-                                                    <p className="text-xs text-gray-500 mb-2">Video Recording:</p>
-                                                    <video
-                                                        controls
-                                                        className="w-full h-32 rounded"
-                                                        src={URL.createObjectURL(interviewData.videoFiles[index])}
-                                                    />
-                                                </div>
-                                            )}
+                                {interviewData.questions.map((question, index) => {
+                                    if (!interviewData.answers[index]) return null;
+
+                                    return (
+                                        <div key={question.id || index} className="border-l-4 border-blue-400 pl-4">
+                                            <p className="font-medium text-gray-800">{question.question}</p>
+                                            <p className="text-gray-600 mt-1">Score: {interviewData.nervousness[index] || 0}%</p>
+                                            <p className="text-gray-700 mt-2 italic">"{interviewData.answers[index] || 'No answer provided'}"</p>
+                                            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                {interviewData.audioFiles[index] && (
+                                                    <div className="bg-white p-3 rounded-lg border">
+                                                        <p className="text-xs text-gray-500 mb-2">Audio Recording:</p>
+                                                        <audio
+                                                            controls
+                                                            className="w-full h-8"
+                                                            src={URL.createObjectURL(interviewData.audioFiles[index])}
+                                                        />
+                                                    </div>
+                                                )}
+                                                {interviewData.videoFiles[index] && (
+                                                    <div className="bg-white p-3 rounded-lg border">
+                                                        <p className="text-xs text-gray-500 mb-2">Video Recording:</p>
+                                                        <video
+                                                            controls
+                                                            className="w-full h-32 rounded"
+                                                            src={URL.createObjectURL(interviewData.videoFiles[index])}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
                         <div className="mt-8 flex justify-center space-x-4">
@@ -606,8 +646,31 @@ const MainPage = () => {
 
     // Interview In Progress Screen
     if (interviewData.isInterviewStarted) {
-        const currentQuestion = demoQuestions[interviewData.currentQuestion];
-        const progress = ((interviewData.currentQuestion + 1) / demoQuestions.length) * 100;
+        if (!interviewData.questions || interviewData.questions.length === 0) {
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+                    <div className="text-center">
+                        <div className="text-red-600 mb-4">
+                            <svg className="w-16 h-16 mx-auto" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                            </svg>
+                        </div>
+                        <h2 className="text-2xl font-semibold text-gray-800 mb-2">Failed to Load Questions</h2>
+                        <p className="text-gray-600 mb-4">Unable to fetch interview questions. Please try again.</p>
+                        <button
+                            onClick={handleCancelInterview}
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg"
+                        >
+                            Go Back
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        const currentQuestion = interviewData.questions[interviewData.currentQuestion];
+        const progress = ((interviewData.currentQuestion + 1) / interviewData.questions.length) * 100;
+        const isLastQuestion = interviewData.currentQuestion === interviewData.questions.length - 1;
 
         return (
             <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
@@ -621,7 +684,7 @@ const MainPage = () => {
                                         <h1 className="text-2xl font-bold text-gray-800">AI Interview Agent</h1>
                                         <div className="text-right">
                                             <span className="text-sm text-gray-600">
-                                                Question {interviewData.currentQuestion + 1} of {demoQuestions.length}
+                                                Question {interviewData.currentQuestion + 1} of {interviewData.questions.length}
                                             </span>
                                             <p className="text-xs text-blue-600">
                                                 Mode: {interviewData.recordingMode === 'video' ? 'Video with Audio Extract' : 'Audio Only'}
@@ -736,12 +799,12 @@ const MainPage = () => {
 
                                         {/* Right Side - Answer Input */}
                                         <div>
-                                            <h4 className="text-sm font-medium text-gray-700 mb-3">Your Answer (Live Speech-to-Text)</h4>
+                                            <h4 className="text-sm font-medium text-gray-700 mb-3">Your Answer</h4>
                                             <div className="relative">
                                                 <textarea
                                                     value={currentAnswer}
                                                     onChange={(e) => setCurrentAnswer(e.target.value)}
-                                                    placeholder="Type your answer here or start recording to use speech-to-text..."
+                                                    placeholder="Type your answer here..."
                                                     className={`w-full h-80 p-4 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none transition-all shadow-lg ${isRecording
                                                         ? 'border-red-300 bg-red-50'
                                                         : 'border-gray-300'
@@ -750,7 +813,7 @@ const MainPage = () => {
                                                 {isRecording && (
                                                     <div className="absolute top-3 right-3 flex items-center space-x-2 text-red-600 animate-pulse">
                                                         <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                                                        <span className="text-sm font-medium">LIVE TRANSCRIPTION</span>
+                                                        <span className="text-sm font-medium">RECORDING</span>
                                                     </div>
                                                 )}
                                             </div>
@@ -793,11 +856,24 @@ const MainPage = () => {
                                                     Cancel Interview
                                                 </button>
                                                 <button
-                                                    onClick={handleNextQuestion}
-                                                    disabled={!currentAnswer.trim() || currentAnswer.includes('[Speaking...]')}
-                                                    className="px-6 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white rounded-lg font-medium transition-colors"
+                                                    onClick={handleEndInterview}
+                                                    className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-medium transition-colors"
                                                 >
-                                                    {interviewData.currentQuestion === demoQuestions.length - 1 ? 'Finish Interview' : 'Next Question'}
+                                                    End Interview
+                                                </button>
+                                                <button
+                                                    onClick={handleNextQuestion}
+                                                    disabled={!currentAnswer.trim() || isSubmittingAnswer}
+                                                    className="px-6 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white rounded-lg font-medium transition-colors flex items-center space-x-2"
+                                                >
+                                                    {isSubmittingAnswer ? (
+                                                        <>
+                                                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                                            <span>Submitting...</span>
+                                                        </>
+                                                    ) : (
+                                                        <span>{isLastQuestion ? 'Finish Interview' : 'Next Question'}</span>
+                                                    )}
                                                 </button>
                                             </div>
                                         </div>
@@ -806,7 +882,7 @@ const MainPage = () => {
                                                 <div className="flex items-center space-x-2 text-red-700">
                                                     <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
                                                     <span className="text-sm font-medium">
-                                                        Recording {interviewData.recordingMode === 'video' ? 'video with audio' : 'audio only'} and converting speech to text...
+                                                        Recording {interviewData.recordingMode === 'video' ? 'video with audio' : 'audio only'}...
                                                         Speak clearly into the microphone
                                                     </span>
                                                 </div>
@@ -822,10 +898,10 @@ const MainPage = () => {
                     <div className="w-80 bg-white shadow-lg p-6">
                         <div className="mb-6">
                             <h3 className="text-lg font-semibold text-gray-800 mb-4">Interview Progress</h3>
-                            <div className="space-y-3">
-                                {demoQuestions.map((question, index) => (
+                            <div className="space-y-3 max-h-96 overflow-y-auto">
+                                {interviewData.questions.map((question, index) => (
                                     <div
-                                        key={question.id}
+                                        key={question.id || index}
                                         className={`p-3 rounded-lg text-sm ${index === interviewData.currentQuestion
                                             ? 'bg-blue-100 border-l-4 border-blue-600'
                                             : index < interviewData.currentQuestion
@@ -833,14 +909,19 @@ const MainPage = () => {
                                                 : 'bg-gray-50'
                                             }`}
                                     >
-                                        <div className="font-medium">{question.category}</div>
-                                        <div className="text-gray-600 truncate">{question.question}</div>
+                                        <div className="font-medium">{question.category || `Question ${index + 1}`}</div>
+                                        <div className="text-gray-600 text-xs mt-1 line-clamp-2">{question.question}</div>
                                         {index < interviewData.currentQuestion && (
                                             <div className="mt-1 text-green-600 text-xs">
-                                                ✓ Completed | Nervousness: {interviewData.nervousness[index] || 0}%
+                                                ✓ Completed | Score: {interviewData.nervousness[index] || 0}%
                                                 <br />
                                                 {interviewData.audioFiles[index] && '🎵 Audio'}
                                                 {interviewData.videoFiles[index] && ' 📹 Video'}
+                                            </div>
+                                        )}
+                                        {index === interviewData.currentQuestion && (
+                                            <div className="mt-1 text-blue-600 text-xs">
+                                                📝 Current Question
                                             </div>
                                         )}
                                     </div>
@@ -848,15 +929,15 @@ const MainPage = () => {
                             </div>
                         </div>
                         <div className="bg-gray-50 rounded-lg p-4">
-                            <h4 className="font-medium text-gray-800 mb-2">Live Status</h4>
+                            <h4 className="font-medium text-gray-800 mb-2">Session Info</h4>
                             <div className="text-sm text-gray-600 space-y-1">
-                                <div>Questions: {interviewData.answers.filter(a => a).length}/{demoQuestions.length}</div>
-                                <div>Mode: {interviewData.recordingMode === 'video' ? '📹 Video + Audio' : '🎵 Audio Only'}</div>
-                                <div>Status: {isInitialized ? '✓ Ready' : '⚠️ Not Initialized'}</div>
-                                <div>Recording: {isRecording ? '🔴 Active' : '⏸️ Stopped'}</div>
-                                <div>Current Recording: {recordedBlob ? `✅ ${Math.round(recordedBlob.size / 1024)}KB` : '❌ None'}</div>
+                                <div>Questions: {interviewData.answers.filter(a => a).length}/{interviewData.questions.length}</div>
+                                <div>Mode: {interviewData.recordingMode === 'video' ? 'Video + Audio' : 'Audio Only'}</div>
+                                <div>Status: {isInitialized ? 'Ready' : 'Not Initialized'}</div>
+                                <div>Recording: {isRecording ? 'Active' : 'Stopped'}</div>
+                                <div>Current Recording: {recordedBlob ? `${Math.round(recordedBlob.size / 1024)}KB` : 'None'}</div>
                                 {interviewData.recordingMode === 'video' && (
-                                    <div>Extracted Audio: {extractedAudioFromVideo ? `✅ ${Math.round(extractedAudioFromVideo.size / 1024)}KB` : '❌ None'}</div>
+                                    <div>Extracted Audio: {extractedAudioFromVideo ? `${Math.round(extractedAudioFromVideo.size / 1024)}KB` : 'None'}</div>
                                 )}
                             </div>
                         </div>
@@ -951,9 +1032,9 @@ const MainPage = () => {
                                     </div>
                                     <ul className="text-sm text-blue-700 space-y-1">
                                         <li>• Microphone access only</li>
-                                        <li>• Live speech-to-text</li>
                                         <li>• Audio recording saved</li>
                                         <li>• No video preview</li>
+                                        <li>• Type your answers manually</li>
                                     </ul>
                                 </div>
 
@@ -969,9 +1050,9 @@ const MainPage = () => {
                                     </div>
                                     <ul className="text-sm text-purple-700 space-y-1">
                                         <li>• Camera + microphone access</li>
-                                        <li>• Live speech-to-text</li>
                                         <li>• Video recording saved</li>
                                         <li>• Audio auto-extracted from video</li>
+                                        <li>• Type your answers manually</li>
                                     </ul>
                                 </div>
                             </div>
@@ -984,11 +1065,11 @@ const MainPage = () => {
                         <div className="bg-blue-50 rounded-lg p-4">
                             <h3 className="font-semibold text-blue-800 mb-2">What to Expect:</h3>
                             <ul className="text-sm text-blue-700 space-y-1">
-                                <li>• 6 interview questions tailored to your job role</li>
+                                <li>• Interview questions tailored to your job role</li>
                                 <li>• Voice analysis to detect nervousness levels</li>
-                                <li>• Real-time speech-to-text in both modes</li>
                                 <li>• Detailed performance report at the end</li>
                                 <li>• Results exported to Google Sheets</li>
+                                <li>• AI-powered feedback and recommendations</li>
                             </ul>
                         </div>
 
