@@ -83,39 +83,68 @@ const MainPage = () => {
 
     // Fetch questions from API
     const fetchQuestions = async (jobTitle) => {
+        console.log("From fetch question called by audio")
         try {
-            setIsLoadingQuestions(true);
-            const response = await fetch('https://cmfoxoaokjf2y2py53m5n2pv7.agent.a.smyth.ai/api/generate_interview_questions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    topics: `${jobTitle}, software development, machine learning, data science`,
-                    question_count: 30,
-                    type: "Intern, Entry Level"
-                })
-            });
+          setIsLoadingQuestions(true);
 
-            if (response.ok) {
-                const data = await response.json();
-                // Transform API response to match our question format
-                const questions = Array.isArray(data) ? data : data.questions || [];
-                return questions.map((q, index) => ({
-                    id: index + 1,
-                    question: typeof q === 'string' ? q : q.question || q.text || q,
-                    category: q.category || `Question ${index + 1}`
-                }));
-            } else {
-                throw new Error('Failed to fetch questions');
+          const response = await fetch(
+            "https://cmfoxoaokjf2y2py53m5n2pv7.agent.a.smyth.ai/api/generate_interview_questions",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                topics: `${jobTitle}, software development, machine learning, data science`,
+                question_count: 3,
+                type: "Intern, Entry Level",
+              }),
             }
+          );
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          const data = await response.json();
+
+          let rawQuestions = [];
+
+            if (typeof data === "object") {
+              rawQuestions = Object.values(data)[0]
+                .split(/\d+\.\s+/)
+                .filter(Boolean);
+            } 
+            
+            
+
+          const questions = rawQuestions.map((q, index) => {
+            let text = typeof q === "string" ? q.trim() : String(q);
+
+            const match = text.match(/\[(.*?)\]$/);
+
+            let type = null;
+            if (match) {
+              type = match[1];
+              text = text.replace(/\[(.*?)\]$/, "").trim();
+            }
+
+            return {
+              id: index + 1,
+              question: text,
+              type: type || "general",
+            };
+          });
+
+          console.log("Parsed Questions:", questions);
+          return questions;
         } catch (error) {
-            console.log('Error fetching questions:', error);
-            // Fallback to demo questions
-            return demoQuestions;
+          console.error("Error fetching questions:", error);
+          return demoQuestions;
         } finally {
-            setIsLoadingQuestions(false);
+          setIsLoadingQuestions(false);
         }
+
     };
 
     // Simple audio extraction from video
