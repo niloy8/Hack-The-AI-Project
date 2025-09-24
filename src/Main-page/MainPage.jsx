@@ -28,7 +28,6 @@ const MainPage = () => {
     const [recordedBlob, setRecordedBlob] = useState(null);
     const [extractedAudioFromVideo, setExtractedAudioFromVideo] = useState(null);
     const [feedbackData, setFeedbackData] = useState(null);
-    const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
     const [isSubmittingAnswer, setIsSubmittingAnswer] = useState(false);
     const [showJobTitleAlert, setShowJobTitleAlert] = useState(false);
     const videoRef = useRef(null);
@@ -78,43 +77,6 @@ const MainPage = () => {
             return 'Marketing Manager';
         } else {
             return demoJobTitles[Math.floor(Math.random() * demoJobTitles.length)];
-        }
-    };
-
-    // Fetch questions from API
-    const fetchQuestions = async (jobTitle) => {
-        try {
-            setIsLoadingQuestions(true);
-            const response = await fetch('https://cmfoxoaokjf2y2py53m5n2pv7.agent.a.smyth.ai/api/generate_interview_questions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    topics: `${jobTitle}, software development, machine learning, data science`,
-                    question_count: 30,
-                    type: "Intern, Entry Level"
-                })
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                // Transform API response to match our question format
-                const questions = Array.isArray(data) ? data : data.questions || [];
-                return questions.map((q, index) => ({
-                    id: index + 1,
-                    question: typeof q === 'string' ? q : q.question || q.text || q,
-                    category: q.category || `Question ${index + 1}`
-                }));
-            } else {
-                throw new Error('Failed to fetch questions');
-            }
-        } catch (error) {
-            console.log('Error fetching questions:', error);
-            // Fallback to demo questions
-            return demoQuestions;
-        } finally {
-            setIsLoadingQuestions(false);
         }
     };
 
@@ -272,15 +234,15 @@ const MainPage = () => {
         }
     };
 
-    const handleStartInterview = async (mode) => {
+    const handleStartInterview = (mode) => {
         if (!interviewData.jobTitle.trim()) {
             setShowJobTitleAlert(true);
             return;
         }
 
         setShowJobTitleAlert(false);
-        // Fetch questions from API
-        const questions = await fetchQuestions(interviewData.jobTitle);
+        // Use demo questions
+        const questions = demoQuestions;
 
         setInterviewData(prev => ({
             ...prev,
@@ -534,18 +496,7 @@ const MainPage = () => {
         }
     };
 
-    // Loading Questions Screen
-    if (isLoadingQuestions) {
-        return (
-            <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-                <div className="text-center">
-                    <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                    <h2 className="text-2xl font-semibold text-gray-800 mb-2">Loading Interview Questions</h2>
-                    <p className="text-gray-600">Generating personalized questions for {interviewData.jobTitle}...</p>
-                </div>
-            </div>
-        );
-    }
+
 
     // Interview Completed Screen
     if (interviewData.isInterviewCompleted) {
