@@ -28,6 +28,7 @@ const MainPage = () => {
     const [recordedBlob, setRecordedBlob] = useState(null);
     const [extractedAudioFromVideo, setExtractedAudioFromVideo] = useState(null);
     const [feedbackData, setFeedbackData] = useState(null);
+    const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
     const [isSubmittingAnswer, setIsSubmittingAnswer] = useState(false);
     const [showJobTitleAlert, setShowJobTitleAlert] = useState(false);
     const videoRef = useRef(null);
@@ -77,6 +78,69 @@ const MainPage = () => {
             return 'Marketing Manager';
         } else {
             return demoJobTitles[Math.floor(Math.random() * demoJobTitles.length)];
+        }
+    };
+
+    // Fetch questions from API
+    const fetchQuestions = async (jobTitle) => {
+        console.log("From fetch question called by audio")
+        try {
+            setIsLoadingQuestions(true);
+
+            const response = await fetch(
+                "https://cmfoxoaokjf2y2py53m5n2pv7.agent.a.smyth.ai/api/generate_interview_questions",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        topics: `${jobTitle}, software development, machine learning, data science`,
+                        question_count: 3,
+                        type: "Intern, Entry Level",
+                    }),
+                }
+            );
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            let rawQuestions = [];
+
+            if (typeof data === "object") {
+                rawQuestions = Object.values(data)[0]
+                    .split(/\d+\.\s+/)
+                    .filter(Boolean);
+            }
+
+            const questions = rawQuestions.map((q, index) => {
+                let text = typeof q === "string" ? q.trim() : String(q);
+
+                const match = text.match(/\[(.*?)\]$/);
+
+                let type = null;
+                if (match) {
+                    type = match[1];
+                    text = text.replace(/\[(.*?)\]$/, "").trim();
+                }
+
+                return {
+                    id: index + 1,
+                    question: text,
+                    type: type || "general",
+                };
+            });
+
+            console.log("Parsed Questions:", questions);
+            return questions;
+        } catch (error) {
+            console.error("Error fetching questions:", error);
+            return demoQuestions;
+        } finally {
+            setIsLoadingQuestions(false);
         }
     };
 
@@ -234,15 +298,15 @@ const MainPage = () => {
         }
     };
 
-    const handleStartInterview = (mode) => {
+    const handleStartInterview = async (mode) => {
         if (!interviewData.jobTitle.trim()) {
             setShowJobTitleAlert(true);
             return;
         }
 
         setShowJobTitleAlert(false);
-        // Use demo questions
-        const questions = demoQuestions;
+        // Fetch questions from API
+        const questions = await fetchQuestions(interviewData.jobTitle);
 
         setInterviewData(prev => ({
             ...prev,
@@ -496,7 +560,18 @@ const MainPage = () => {
         }
     };
 
-
+    // Loading Questions Screen
+    if (isLoadingQuestions) {
+        return (
+            <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+                <div className="text-center">
+                    <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                    <h2 className="text-2xl font-semibold text-gray-800 mb-2">Loading Interview Questions</h2>
+                    <p className="text-gray-600">Generating personalized questions for {interviewData.jobTitle}...</p>
+                </div>
+            </div>
+        );
+    }
 
     // Interview Completed Screen
     if (interviewData.isInterviewCompleted) {
